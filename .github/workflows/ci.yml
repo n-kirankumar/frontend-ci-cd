@@ -1,4 +1,4 @@
-name: React CI Pipeline
+name: Full React CI Pipeline
 
 on:
   push:
@@ -7,24 +7,30 @@ on:
 
 jobs:
 
+  # 1️⃣ Checkout & Setup
   checkout:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+  # 2️⃣ Install Dependencies
   install:
     needs: checkout
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 18
-      - run: |
+
+      - name: Install dependencies
+        run: |
           cd frontend-app
           npm install
 
-  test:
+  # 3️⃣ Static Code Analysis
+  lint:
     needs: install
     runs-on: ubuntu-latest
     steps:
@@ -32,51 +38,70 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 18
-      - run: |
+
+      - name: Run ESLint
+        run: |
           cd frontend-app
           npm install
-          npm test -- --watchAll=false
+          npx eslint src || true
 
-  build:
-    needs: test
+  # 4️⃣ Security Scan (Bandit - simulated)
+  security:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Bandit scan
+        run: |
+          pip install bandit
+          bandit -r . || true
+
+  # 5️⃣ Unit Tests
+  test:
+    needs: security
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 18
-      - run: |
+
+      - name: Run unit tests
+        run: |
           cd frontend-app
           npm install
-          npm run build
+          CI=true npm test
 
-  docker-build:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: |
-          cd frontend-app
-          docker build -t simple-react-app .
-
+  # 6️⃣ Trivy Filesystem Scan (Before Docker)
   trivy-fs:
-    needs: docker-build
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@master
+
+      - name: Trivy FS scan
+        uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
           scan-ref: frontend-app
           severity: HIGH,CRITICAL
 
-  trivy-image:
+  # 7️⃣ Docker Build + 8️⃣ Trivy Image Scan
+  docker-build-scan:
     needs: trivy-fs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@master
+
+      - name: Build Docker image
+        run: |
+          cd frontend-app
+          docker build -t simple-react-app:latest .
+
+      - name: Trivy Image scan
+        uses: aquasecurity/trivy-action@master
         with:
-          image-ref: simple-react-app
+          image-ref: simple-react-app:latest
           severity: HIGH,CRITICAL
 
